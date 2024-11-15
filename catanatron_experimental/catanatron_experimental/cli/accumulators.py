@@ -4,8 +4,15 @@ import json
 from collections import defaultdict
 
 import numpy as np
+from enum import Enum
+from dataclasses import dataclass
 
 from catanatron.game import GameAccumulator, Game, State
+from catanatron.models.board import Board
+from catanatron.models.map import Water, Port, LandTile, CatanMap
+from catanatron.models.enums import Action
+from catanatron.models.player import Color
+
 from catanatron.json import GameEncoder
 from catanatron.state_functions import (
     get_actual_victory_points,
@@ -169,15 +176,100 @@ class JsonDataAccumulator(GameAccumulator):
             f.write(json.dumps(game, cls=GameEncoder))
 
 class SigmaCatanDataAccumulator(GameAccumulator):
-    DEBUG = True
+    DEBUG = False
     PRETTY_JSON = True
+
+    @dataclass
+    class Data:
+        state: State
+        action: Action
 
     class SigmaCatanGameEncoder(GameEncoder):
         def default(self, obj):
+            # primatives
+            if isinstance(obj, int):
+                return obj
+            if isinstance(obj, str):
+                return obj
+            if isinstance(obj, Enum):
+                return obj.value
+            if isinstance(obj, tuple):
+                return obj
+            
+            # catan types
+            if isinstance(obj, Water):
+                return {
+                        "type": "WATER"
+                        }
+            if isinstance(obj, Port):
+                return {
+                        "port_id": obj.id,
+                        "type": "PORT",
+                        "direction": self.default(obj.direction),
+                        "resource": self.default(obj.resource),
+                        }
+            if isinstance(obj, LandTile):
+                if obj.resource is None:
+                    return {"tile_id": obj.id, "type": "DESERT"}
+                return {
+                        "tile_id": obj.id,
+                        "type": "RESOURCE_TILE",
+                        "resource": self.default(obj.resource),
+                        "number": obj.number,
+                        }
+            
+            if isinstance(obj, CatanMap):
+                return {
+                        "tiles": [
+                            {"coordinate": coordinate, "tile": self.default(tile)}
+                            for coordinate, tile in obj.tiles.items()
+                        ],
+                        "adjacent_tiles": obj.adjacent_tiles,
+                        "nodes": [
+                                    {
+                                        "node_id": node_id,
+                                        "coordinate": coordinate,
+                                        "tile": self.default(tile),
+                                        "direction": self.default(direction)
+                                    }
+                                    for coordinate, tile in obj.tiles.items()
+                                    for direction, node_id in tile.nodes.items()
+                                ],
+                        "edges": [
+                                    {
+                                        "edge_id": tuple(sorted(edge)),
+                                        "coordinate": coordinate,
+                                        "tile": self.default(tile),
+                                        "direction": self.default(direction)
+                                    }
+                                    for coordinate, tile in obj.tiles.items()
+                                    for direction, edge in tile.edges.items()
+
+                                ]
+                        }
+
+            if isinstance(obj, Board):
+                return {
+                        "buildings": [{"node_id": id, "color": self.default(building[0]), "type": self.default(building[1])} for id, building in obj.buildings.items()],
+                        "roads": [{"edge_id": tuple(id), "color": self.default(color)} for id, color in obj.roads.items()],
+                        "robber_coordinate": obj.robber_coordinate,
+                        }
             if isinstance(obj, State):
-                return obj.player_state
-            else:
-                return super().default(obj)
+                return {
+                        "current_player": obj.current_color(),
+                        "players": obj.colors,
+                        "state": obj.player_state, 
+                        "board": obj.board,
+                        "playable_actions": obj.playable_actions, # TODO(jai): Do we need this?
+                        }
+            
+            if isinstance(obj, SigmaCatanDataAccumulator.Data):
+                return {
+                        "state": self.default(obj.state),
+                        "action": self.default(obj.action)
+                }
+
+            return super().default(obj)
 
     def __init__(self, base_file_path):
 
@@ -188,12 +280,6 @@ class SigmaCatanDataAccumulator(GameAccumulator):
         print(f"Creating base dir: {self.base_file_path}\n")
         os.mkdir(self.base_file_path)
         self.indent = "\t"
-
-        # Stored in states.json
-        self.game_states = []
-
-        # Stored in actions.json
-        self.game_actions = []
     
     def __indent_print(self, message):
         if self.DEBUG: print(f"{self.indent} {message}")
@@ -203,8 +289,7 @@ class SigmaCatanDataAccumulator(GameAccumulator):
         Called when the game is created, no actions have
         been taken by players yet, but the board is decided.
         """
-        # not used for now
-        pass
+        self.game_data = []
 
     def step(self, game_before_action, action):
         """
@@ -213,26 +298,25 @@ class SigmaCatanDataAccumulator(GameAccumulator):
         """
 
         # state is an obj which changes so should be copied
-        self.game_states.append(game_before_action.state.copy())
-        self.game_actions.append(action)
+        self.game_data.append(self.Data(state=game_before_action.state.copy(), action=action))
 
     def __write_game(self, game_id):
         dir_path = os.path.join(self.base_file_path, game_id)
         self.__indent_print(f"Creating dir: {dir_path}")
         os.mkdir(dir_path)
 
-        actions_path = os.path.join(dir_path, "actions.json")
-        states_path = os.path.join(dir_path, "states.json")
+        board_path = os.path.join(dir_path, "board.json")
+        data_path = os.path.join(dir_path, "data.json")
 
-        self.__indent_print(f"States file: {states_path}, Actions file: {actions_path}")
+        self.__indent_print(f"States file: {board_path}, Actions file: {data_path}")
 
         indent = 4 if self.PRETTY_JSON else 0
 
-        with open(actions_path, "w") as f:
-            f.write(json.dumps(self.game_actions, cls=self.SigmaCatanGameEncoder, indent=indent))
-        
-        with open(states_path, "w") as f:
-            f.write(json.dumps(self.game_states, cls=self.SigmaCatanGameEncoder, indent=indent))
+        with open(board_path, "w") as f:
+            f.write(json.dumps(self.game_data[0].state.board.map, cls=self.SigmaCatanGameEncoder, indent=indent))
+
+        with open(data_path, "w") as f:
+            f.write(json.dumps(self.game_data, cls=self.SigmaCatanGameEncoder, indent=indent))
 
     def after(self, game):
         """
@@ -247,12 +331,9 @@ class SigmaCatanDataAccumulator(GameAccumulator):
             return
 
         self.__indent_print(f"Game {game.id}: Win for {game.winning_color()}")
-        self.__indent_print(f"Number of actions taken: {len(self.game_actions)}")
-        self.__indent_print(f"Number of states: {len(self.game_states)}")
+        self.__indent_print(f"Number of turns taken: {len(game.state.actions)}")
 
-        # this should always pass if not we need to debug
-        assert len(self.game_actions) == len(self.game_states)
-        self.game_states.append(game.state.copy())
+        self.game_data.append(self.Data(state=game.state.copy(), action=None))
 
         # actually write the game files
         self.__write_game(game.id)
