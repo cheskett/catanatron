@@ -32,6 +32,7 @@ from catanatron_experimental.cli.accumulators import (
     DatabaseAccumulator,
     StatisticsAccumulator,
     VpDistributionAccumulator,
+    SigmaCatanDataAccumulator
 )
 from catanatron_experimental.cli.simulation_accumulator import SimulationAccumulator
 
@@ -267,7 +268,7 @@ def play_batch(
     if output_options.output and output_options.csv:
         accumulators.append(CsvDataAccumulator(output_options.output))
     if output_options.output and output_options.json:
-        accumulators.append(JsonDataAccumulator(output_options.output))
+        accumulators.append(SigmaCatanDataAccumulator(output_options.output))
     if output_options.db:
         accumulators.append(DatabaseAccumulator())
     for accumulator_class in CUSTOM_ACCUMULATORS:

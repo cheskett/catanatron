@@ -5,7 +5,7 @@ from collections import defaultdict
 
 import numpy as np
 
-from catanatron.game import GameAccumulator, Game
+from catanatron.game import GameAccumulator, Game, State
 from catanatron.json import GameEncoder
 from catanatron.state_functions import (
     get_actual_victory_points,
@@ -167,6 +167,98 @@ class JsonDataAccumulator(GameAccumulator):
         filepath = os.path.join(self.output, f"{game.id}.json")
         with open(filepath, "w") as f:
             f.write(json.dumps(game, cls=GameEncoder))
+
+class SigmaCatanDataAccumulator(GameAccumulator):
+    DEBUG = True
+    PRETTY_JSON = True
+
+    class SigmaCatanGameEncoder(GameEncoder):
+        def default(self, obj):
+            if isinstance(obj, State):
+                return obj.player_state
+            else:
+                return super().default(obj)
+
+    def __init__(self, base_file_path):
+
+        # Housekeeping
+        from datetime import datetime
+        self.time = datetime.now().strftime('%Y-%m-%d_%H_%M_%S')
+        self.base_file_path = os.path.join(base_file_path, self.time)
+        print(f"Creating base dir: {self.base_file_path}\n")
+        os.mkdir(self.base_file_path)
+        self.indent = "\t"
+
+        # Stored in states.json
+        self.game_states = []
+
+        # Stored in actions.json
+        self.game_actions = []
+    
+    def __indent_print(self, message):
+        if self.DEBUG: print(f"{self.indent} {message}")
+
+    def before(self, game):
+        """
+        Called when the game is created, no actions have
+        been taken by players yet, but the board is decided.
+        """
+        # not used for now
+        pass
+
+    def step(self, game_before_action, action):
+        """
+        Called after each action taken by a player.
+        Game should be right before action is taken.
+        """
+
+        # state is an obj which changes so should be copied
+        self.game_states.append(game_before_action.state.copy())
+        self.game_actions.append(action)
+
+    def __write_game(self, game_id):
+        dir_path = os.path.join(self.base_file_path, game_id)
+        self.__indent_print(f"Creating dir: {dir_path}")
+        os.mkdir(dir_path)
+
+        actions_path = os.path.join(dir_path, "actions.json")
+        states_path = os.path.join(dir_path, "states.json")
+
+        self.__indent_print(f"States file: {states_path}, Actions file: {actions_path}")
+
+        indent = 4 if self.PRETTY_JSON else 0
+
+        with open(actions_path, "w") as f:
+            f.write(json.dumps(self.game_actions, cls=self.SigmaCatanGameEncoder, indent=indent))
+        
+        with open(states_path, "w") as f:
+            f.write(json.dumps(self.game_states, cls=self.SigmaCatanGameEncoder, indent=indent))
+
+    def after(self, game):
+        """
+        Called when the game is finished.
+
+        Check game.winning_color() to see if the game
+        actually finished or exceeded turn limit (is None).
+        """
+
+        if game.winning_color() is None:
+            self.__indent_print(f"Game {game.id} dropped due to exceeding turn limit")
+            return
+
+        self.__indent_print(f"Game {game.id}: Win for {game.winning_color()}")
+        self.__indent_print(f"Number of actions taken: {len(self.game_actions)}")
+        self.__indent_print(f"Number of states: {len(self.game_states)}")
+
+        # this should always pass if not we need to debug
+        assert len(self.game_actions) == len(self.game_states)
+        self.game_states.append(game.state.copy())
+
+        # actually write the game files
+        self.__write_game(game.id)
+
+        self.__indent_print(f"-------------------\n")
+        pass
 
 
 class CsvDataAccumulator(GameAccumulator):
