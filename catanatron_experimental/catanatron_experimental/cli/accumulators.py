@@ -258,7 +258,7 @@ class SigmaCatanDataAccumulator(GameAccumulator):
                 return {
                         "current_player": obj.current_color(),
                         "players": obj.colors,
-                        "state": obj.player_state, 
+                        "player_states": obj.player_state, 
                         "board": obj.board,
                         "playable_actions": obj.playable_actions, # TODO(jai): Do we need this?
                         }
@@ -300,7 +300,7 @@ class SigmaCatanDataAccumulator(GameAccumulator):
         # state is an obj which changes so should be copied
         self.game_data.append(self.Data(state=game_before_action.state.copy(), action=action))
 
-    def __write_game(self, game_id):
+    def __write_game(self, game_id, winning_color):
         dir_path = os.path.join(self.base_file_path, game_id)
         self.__indent_print(f"Creating dir: {dir_path}")
         os.mkdir(dir_path)
@@ -316,7 +316,7 @@ class SigmaCatanDataAccumulator(GameAccumulator):
             f.write(json.dumps(self.game_data[0].state.board.map, cls=self.SigmaCatanGameEncoder, indent=indent))
 
         with open(data_path, "w") as f:
-            f.write(json.dumps(self.game_data, cls=self.SigmaCatanGameEncoder, indent=indent))
+            f.write(json.dumps({"game": self.game_data, "winner":winning_color}, cls=self.SigmaCatanGameEncoder, indent=indent))
 
     def after(self, game):
         """
@@ -336,7 +336,7 @@ class SigmaCatanDataAccumulator(GameAccumulator):
         self.game_data.append(self.Data(state=game.state.copy(), action=None))
 
         # actually write the game files
-        self.__write_game(game.id)
+        self.__write_game(game.id, game.winning_color())
 
         self.__indent_print(f"-------------------\n")
         pass
